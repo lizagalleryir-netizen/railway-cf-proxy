@@ -38,5 +38,6 @@ app.post("/fetch", async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log("proxy running on " + port));
+const PORT = process.env.PORT || 8080;
+app.listen(PO () => console.log(`proxy running on ${PORT}`));
+
