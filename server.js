@@ -1,43 +1,38 @@
-
-import express from "express";
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+const express = require("express");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 
 puppeteer.use(StealthPlugin());
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
 
-app.post("/fetch", async (req, res) => {
-  const { url } = req.body;
+app.get("/", (req, res) => {
+  res.send("✅ Cloudflare bypass proxy running on Railway");
+});
 
-  if (!url) {
-    return res.status(400).json({ error: "URL is required" });
-  }
+app.get("/fetch", async (req, res) => {
+  const target = req.query.url;
+  if (!target) return res.status(400).send("❌ Missing url parameter");
 
   try {
     const browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
-
     const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"
-    );
-
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-
+    await page.goto(target, { waitUntil: "domcontentloaded", timeout: 30000 });
     const html = await page.content();
     await browser.close();
-
-    res.json({ success: true, html });
-
-  } catch (err) {
-    res.status(500).json({ error: err.toString() });
+    res.send(html);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send("⚠️ Error fetching page: " + e.message);
   }
 });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PO () => console.log(`proxy running on ${PORT}`));
+// 👇 نکته مهم:
+const PORT = process.env.PORT || 3000;
 
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Proxy running on port ${PORT}`);
+});
