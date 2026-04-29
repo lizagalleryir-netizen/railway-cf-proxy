@@ -6,40 +6,93 @@ puppeteer.use(StealthPlugin());
 
 const app = express();
 
+const PORT = process.env.PORT || 3000;
+const API_KEY = process.env.API_KEY || "mysecretkey";
+
+let browser;
+
+/* ---------- launch browser once ---------- */
+async function initBrowser() {
+  browser = await puppeteer.launch({
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu"
+    ]
+  });
+
+  console.log("✅ Browser started");
+}
+
+initBrowser();
+
+/* ---------- health check ---------- */
 app.get("/", (req, res) => {
   res.send("Cloudflare bypass proxy running");
 });
 
+/* ---------- proxy endpoint ---------- */
 app.get("/proxy", async (req, res) => {
-  const url = req.query.url;
-
-  if (!url) {
-    return res.status(400).send("Missing url parameter");
-  }
-
   try {
-    const browser = await puppeteer.launch({
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox"
-      ]
+
+    const { url, key, screenshot, render } = req.query;
+
+    if (key !== API_KEY) {
+      return res.status(403).send("Invalid API key");
+    }
+
+    if (!url) {
+      return res.status(400).send("Missing url");
+    }
+
+    /* ---------- fast fetch (no JS render) ---------- */
+    if (render === "false") {
+      const fetch = (...args) =>
+        import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
+      const response = await fetch(url, { timeout: 20000 });
+      const text = await response.text();
+
+      res.set("Content-Type", "text/html");
+      return res.send(text);
+    }
+
+    /* ---------- puppeteer render ---------- */
+    const page = await browser.newPage();
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+    );
+
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
     });
 
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle2" });
+    /* ---------- screenshot mode ---------- */
+    if (screenshot === "true") {
+      const img = await page.screenshot({ type: "png" });
+      await page.close();
 
-    const content = await page.content();
+      res.set("Content-Type", "image/png");
+      return res.send(img);
+    }
 
-    await browser.close();
+    const html = await page.content();
+    await page.close();
 
-    res.send(content);
+    res.set("Content-Type", "text/html");
+    res.send(html);
+
   } catch (err) {
-    res.status(500).send(err.toString());
+    console.error(err);
+    res.status(500).send("Proxy error");
   }
 });
 
-const PORT = process.env.PORT || 3000;
-
+/* ---------- start server ---------- */
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Proxy running on port " + PORT);
+  console.log("Server running on port " + PORT);
 });
