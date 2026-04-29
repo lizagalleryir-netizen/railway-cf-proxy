@@ -60,27 +60,27 @@ app.get("/proxy", async (req, res) => {
     }
 
     /* ---------- puppeteer render ---------- */
-    const page = await browser.newPage();
+const page = await browser.newPage();
 
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-    );
+await page.setUserAgent(
+ "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+);
 
-    await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000
-    });
+await page.setViewport({
+ width: 1366,
+ height: 768
+});
 
-    /* ---------- screenshot mode ---------- */
-    if (screenshot === "true") {
-      const img = await page.screenshot({ type: "png" });
-      await page.close();
+await page.goto(url, {
+ waitUntil: "networkidle2",
+ timeout: 60000
+});
 
-      res.set("Content-Type", "image/png");
-      return res.send(img);
-    }
+// allow cloudflare challenge to complete
+await page.waitForTimeout(8000);
 
-    const html = await page.content();
+const html = await page.content();
+
     await page.close();
 
     res.set("Content-Type", "text/html");
