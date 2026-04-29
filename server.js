@@ -6,58 +6,58 @@ puppeteer.use(StealthPlugin());
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const API_KEY = process.env.API_KEY || "mysecretkey";
 
-/* ---------------- Browser Pool ---------------- */
+/* ---------- utils ---------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/* ---------- browser ---------- */
 let browser;
-const MAX_PAGES = 5;
-let activePages = 0;
+let launching = false;
 
-async function startBrowser() {
-  browser = await puppeteer.launch({
-    headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-gpu"
-    ]
-  });
+async function launchBrowser() {
+  if (launching) return;
+  launching = true;
 
-  console.log("✅ Browser started");
-}
-
-startBrowser();
-
-/* ---------------- Helper ---------------- */
-
-async function solveCloudflare(page) {
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
+        "--single-process"
+      ]
+    });
 
-    await page.waitForFunction(() => {
-      const title = document.title.toLowerCase();
-      return !title.includes("just a moment");
-    }, { timeout: 20000 });
+    console.log("✅ Browser started");
+
+    browser.on("disconnected", () => {
+      console.log("⚠️ Browser disconnected, relaunching...");
+      browser = null;
+      launchBrowser();
+    });
 
   } catch (e) {
-    console.log("Cloudflare challenge maybe still active");
+    console.error("❌ Browser launch failed:", e);
+  } finally {
+    launching = false;
   }
 }
 
-/* ---------------- Health ---------------- */
+launchBrowser();
 
-app.get("/", (req, res) => {
+/* ---------- routes ---------- */
+
+app.get("/", (_, res) => {
   res.send("Cloudflare bypass proxy running");
 });
 
-/* ---------------- Proxy ---------------- */
-
 app.get("/proxy", async (req, res) => {
-
-  const { url, key, screenshot } = req.query;
+  const { url, key } = req.query;
 
   if (key !== API_KEY) {
     return res.status(403).send("Invalid API key");
@@ -67,25 +67,20 @@ app.get("/proxy", async (req, res) => {
     return res.status(400).send("Missing url");
   }
 
-  if (activePages >= MAX_PAGES) {
-    return res.status(429).send("Server busy");
+  if (!browser) {
+    await launchBrowser();
+    return res.status(503).send("Browser warming up, retry in 5s");
   }
 
   let page;
 
   try {
-
-    activePages++;
-
     page = await browser.newPage();
 
-    await page.setViewport({
-      width: 1366,
-      height: 768
-    });
+    await page.setViewport({ width: 1366, height: 768 });
 
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
     );
 
     await page.setExtraHTTPHeaders({
@@ -93,51 +88,32 @@ app.get("/proxy", async (req, res) => {
     });
 
     await page.goto(url, {
-      waitUntil: "networkidle2",
+      waitUntil: "domcontentloaded",
       timeout: 60000
     });
 
-    /* try solving cloudflare */
-
-    await solveCloudflare(page);
-
-    await page.waitForTimeout(5000);
-
-    if (screenshot === "true") {
-
-      const img = await page.screenshot({
-        type: "png",
-        fullPage: true
-      });
-
-      await page.close();
-      activePages--;
-
-      res.set("Content-Type", "image/png");
-      return res.send(img);
-    }
+    /* give cloudflare time */
+    await sleep(10000);
 
     const html = await page.content();
 
     await page.close();
-    activePages--;
 
     res.set("Content-Type", "text/html");
     res.send(html);
 
   } catch (err) {
+    console.error("❌ Proxy error:", err);
 
-    console.error(err);
-
-    if (page) await page.close();
-    activePages--;
+    if (page) {
+      try { await page.close(); } catch {}
+    }
 
     res.status(500).send("Proxy error");
   }
 });
 
-/* ---------------- Start Server ---------------- */
-
+/* ---------- start ---------- */
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Server running on port " + PORT);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
